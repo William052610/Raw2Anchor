@@ -196,4 +196,3 @@ All outputs are written to the selected output folder.
 ## Contact / attribution
 
 If you include this repository or the anchor-based benchmarking concept in a paper, please cite the associated manuscript/code release.
-manuscript (or add a CITATION file in your final release).
