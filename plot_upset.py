@@ -17,7 +17,7 @@ def plot_upset_top(
     presence_df: pd.DataFrame,
     top_k: int = 25,
     outfile: str = "upset_plot.png",
-    title: str = "E.coli",
+    title: str = "Upset plot",
     method_order=None,
 ):
     """
