@@ -1,6 +1,6 @@
 """summarize.py
 
-Post-processing utilities for the reverse-alignment benchmarking pipeline.
+Post-processing utilities for the Raw2Anchor pipeline.
 
 Given per-method final match tables (feature -> anchor), this module derives:
 
@@ -117,3 +117,61 @@ def get_unique_features(matches_final_list) -> dict:
         }
 
     return result
+
+def upset_tables(presence_df: pd.DataFrame, method_order=None) -> dict:
+    """Build the tables needed to draw an UpSet plot.
+
+    Each anchor is counted once, in the exact combination of methods that
+    found it (exclusive intersections, as in a standard UpSet plot).
+
+    Parameters
+    ----------
+    presence_df : pandas.DataFrame
+        Output of `build_presence` (columns: 'anchor_id', method columns 0/1).
+    method_order : list[str] or None
+        Preferred method order. Methods not listed are appended at the end.
+
+    Returns
+    -------
+    dict
+        "intersections": one row per combination, sorted by
+            intersection_size (descending), then n_methods (ascending), then
+            combination. Columns: rank, combination, n_methods,
+            intersection_size, and one 0/1 column per method.
+        "set_sizes": one row per method in `method_order`. Columns: method,
+            set_size (anchors found by the method), unique_size (anchors found
+            only by the method).
+    """
+    pres = presence_df.set_index("anchor_id").astype(int)
+    cols = list(pres.columns)
+    methods = [m for m in (method_order or []) if m in cols]
+    methods += [c for c in cols if c not in methods]
+    pres = pres[methods]
+
+    counts = {}
+    for row in pres.itertuples(index=False):
+        key = tuple(int(v) for v in row)
+        if any(key):
+            counts[key] = counts.get(key, 0) + 1
+
+    rows = []
+    for key, n in counts.items():
+        active = [m for m, v in zip(methods, key) if v == 1]
+        rec = {"combination": " & ".join(active), "n_methods": len(active),
+               "intersection_size": n}
+        rec.update(dict(zip(methods, key)))
+        rows.append(rec)
+    inter = pd.DataFrame(rows, columns=["combination", "n_methods", "intersection_size"] + methods)
+    inter = inter.sort_values(
+        ["intersection_size", "n_methods", "combination"],
+        ascending=[False, True, True], kind="mergesort",
+    ).reset_index(drop=True)
+    inter.insert(0, "rank", range(1, len(inter) + 1))
+
+    others = pres.sum(axis=1)
+    set_sizes = pd.DataFrame({
+        "method": methods,
+        "set_size": [int(pres[m].sum()) for m in methods],
+        "unique_size": [int(((pres[m] == 1) & (others == 1)).sum()) for m in methods],
+    })
+    return {"intersections": inter, "set_sizes": set_sizes}

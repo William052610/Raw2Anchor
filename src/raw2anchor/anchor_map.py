@@ -1,14 +1,15 @@
 """anchor_map.py
 
-Build an anchor map (reference grid) for LC–MS reverse alignment.
+Build an anchor map (reference grid) for Raw2Anchor.
 
 Key idea
 --------
 Traditional workflows align feature tables against each other.
 Here we invert the problem: we construct a common set of reference coordinates
 ("anchors") directly from RAW MS1 centroid points, and then map each
-software/method feature list onto those anchors. This makes cross-software and
-cross-smoothing benchmarking straightforward.
+software/method feature list onto those anchors. Feature lists produced with
+different software or smoothing methods can then be compared on the same
+raw-data reference.
 
 Anchor construction (overview)
 ------------------------------
@@ -19,6 +20,8 @@ Anchor construction (overview)
 4. Within each segment, cluster points by `ppm_seed` tolerance.
 5. For clusters with at least `min_points_per_anchor` points, define the anchor
    coordinate as the intensity-weighted median m/z and RT.
+6. Give one ID to anchor pairs that one ion produced on both sides of a bin
+   boundary (`merge_split_anchors`).
 
 Notes
 -----
@@ -97,9 +100,10 @@ def read_raw_points(
     raw_files,
     mz_bin_da: float = 0.001,
     rt_gap_min: float = 0.08,
-    ppm_seed: float = 6.0,
+    ppm_seed: float = 10.0,
     min_points_per_anchor: int = 3,
     ms1_only: bool = True,
+    merge_bin_splits: bool = True,
     logger=print,
 ) -> pd.DataFrame:
     """Build an anchor map from RAW MS1 centroid points.
@@ -112,12 +116,15 @@ def read_raw_points(
         m/z bin width (Da) for candidate bucketing.
     rt_gap_min : float, default 0.08
         Within-bin RT segmentation threshold (minutes). Larger gaps split segments.
-    ppm_seed : float, default 6.0
+    ppm_seed : float, default 10.0
         m/z clustering threshold (ppm) *within* a segment.
     min_points_per_anchor : int, default 3
         Minimum number of centroid points required to emit an anchor.
     ms1_only : bool, default True
         If True, ignore MS2+ scans.
+    merge_bin_splits : bool, default True
+        If True, merge anchors that one ion produced on both sides of an m/z bin
+        boundary (see `merge_split_anchors`). Uses `ppm_seed` and `rt_gap_min`.
     logger : callable, default print
         Logger callback.
 
@@ -131,6 +138,8 @@ def read_raw_points(
         - n_files: number of RAW files contributing to the anchor
         - I_sum: sum of intensities
         - mz_mad_ppm, rt_mad_min: robust dispersion metrics
+        - source_anchor_id, n_merged: pairing by `merge_split_anchors`
+          (paired anchors share `anchor_id`)
     """
     if pymzml is None and mzxml is None:
         raise RuntimeError("Either pymzml or pyteomics (mzxml) is required.")
@@ -207,6 +216,103 @@ def read_raw_points(
     if df.empty:
         raise RuntimeError("0 anchors produced — relax parameters (ppm_seed/rt_gap_min) and confirm RT units are minutes.")
     df.insert(0, "anchor_id", [f"A{idx:07d}" for idx in range(1, len(df)+1)])
+    if merge_bin_splits:
+        n_before = len(df)
+        df = merge_split_anchors(df, mz_bin_da=mz_bin_da, ppm_tol=ppm_seed, rt_tol_min=rt_gap_min)
+        logger(f"[ANCHOR] Bin-boundary pairs given one ID: {n_before:,} rows -> {df['anchor_id'].nunique():,} anchors")
+    return df
+
+
+def merge_split_anchors(
+    anchor_df: pd.DataFrame,
+    mz_bin_da: float = 0.001,
+    ppm_tol: float = 10.0,
+    rt_tol_min: float = 0.08,
+) -> pd.DataFrame:
+    """Give one anchor ID to anchor pairs that one ion produced on both sides of an m/z bin boundary.
+
+    Anchors are built inside fixed-width m/z bins. When the centroid m/z values
+    of one ion fall on both sides of a bin boundary, the ion yields two anchors
+    in adjacent bins with nearly identical m/z and RT. Different feature tables
+    can then be matched to different members of the pair, so one ion would be
+    counted as two anchors.
+
+    Two anchors are paired when
+      1. they lie in adjacent m/z bins,
+      2. their reference m/z and RT differ by no more than `ppm_tol` and
+         `rt_tol_min` (the clustering tolerance and RT gap used to build
+         anchors), and
+      3. each is the other's closest anchor across that boundary, with
+         distance (d_ppm / ppm_tol)^2 + (d_rt / rt_tol_min)^2.
+    Only pairs are formed, so dense regions cannot chain into wide anchors.
+    Anchors within the same bin are never paired.
+
+    Both members keep their own m/z and RT, so feature matching is unchanged.
+    The member with the smaller summed intensity takes the `anchor_id` of the
+    larger member, so features matched to either member are counted as the
+    same anchor. The original ID is kept in `source_anchor_id`.
+
+    Parameters
+    ----------
+    anchor_df : pandas.DataFrame
+        Output of the anchor construction step (columns as in `read_raw_points`).
+    mz_bin_da : float, default 0.001
+        m/z bin width used to build the anchors.
+    ppm_tol : float, default 10.0
+        Maximum m/z difference (ppm) between paired anchors.
+    rt_tol_min : float, default 0.08
+        Maximum RT difference (min) between paired anchors.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Anchor map with the same rows, `anchor_id` shared within each pair,
+        and the columns `source_anchor_id` and `n_merged` (1 or 2).
+    """
+    df = anchor_df.reset_index(drop=True).copy()
+    n = len(df)
+    mz = df["mz_ref"].to_numpy(float)
+    rt = df["rt_ref"].to_numpy(float)
+    key = (mz / mz_bin_da).astype(np.int64)
+
+    by_key = defaultdict(list)
+    for i, k in enumerate(key):
+        by_key[int(k)].append(i)
+
+    best = np.full(n, -1)
+    best_d = np.full(n, np.inf)
+    for k, idx_lo in by_key.items():
+        idx_hi = by_key.get(k + 1)
+        if not idx_hi:
+            continue
+        for i in idx_lo:
+            for j in idx_hi:
+                d_ppm = abs(mz[j] - mz[i]) / mz[i] * 1e6
+                d_rt = abs(rt[j] - rt[i])
+                if d_ppm <= ppm_tol and d_rt <= rt_tol_min:
+                    d = (d_ppm / ppm_tol) ** 2 + (d_rt / rt_tol_min) ** 2
+                    if d < best_d[i]:
+                        best_d[i], best[i] = d, j
+                    if d < best_d[j]:
+                        best_d[j], best[j] = d, i
+
+    ii = np.arange(n)
+    jj = best
+    mutual = (jj > ii) & (best[np.where(jj >= 0, jj, 0)] == ii)
+    i_m, j_m = ii[mutual], jj[mutual]
+    I = df["I_sum"].to_numpy(float)
+    keep = np.where(I[i_m] >= I[j_m], i_m, j_m)
+    minor = np.where(I[i_m] >= I[j_m], j_m, i_m)
+
+    ids = df["anchor_id"].astype(str).to_numpy()
+    new_ids = ids.copy()
+    new_ids[minor] = ids[keep]
+    n_merged = np.ones(n, dtype=int)
+    n_merged[keep] = 2
+    n_merged[minor] = 2
+    df.insert(1, "source_anchor_id", ids)
+    df["anchor_id"] = new_ids
+    df["n_merged"] = n_merged
     return df
 
 

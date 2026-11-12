@@ -1,17 +1,19 @@
 """gui.py
 
-Minimal Tkinter GUI wrapper for the reverse-alignment pipeline.
+Minimal Tkinter GUI for the Raw2Anchor pipeline.
 
-This repository was written for *methods benchmarking* of LC-MS feature detection
-and smoothing strategies. The GUI does the following:
+Raw2Anchor compares LC-MS feature tables produced with different software or
+smoothing methods on a common raw-data reference. The GUI does the following:
 
-1) Build anchor_map.xlsx from RAW files (mzML/mzXML)
+1) Build anchor_map.xlsx from RAW files (mzML/mzXML), including the merge of
+   anchor pairs split by an m/z bin boundary
 2) For each feature CSV (per software/method):
    a) Pass-1 match with generous tolerances
    b) Learn correction models (models.py)
    c) Apply corrections and perform Pass-2 tight match
    d) Save per-method outputs (final matches + model)
-3) Merge results across methods to compute union/unique anchors and UpSet plot
+3) Merge results across methods to compute union/unique anchors and the
+   UpSet intersection table (upset_intersections.xlsx)
 
 For manuscript use, see README.md for parameter definitions and output files.
 """
@@ -23,14 +25,13 @@ import pandas as pd
 from anchor_map import read_raw_points
 from matcher import kd_match_pass
 from models import learn_models, apply_models
-from summarize import build_presence, pairwise_overlap, get_unique_features
-from plot_upset import plot_upset_top
+from summarize import build_presence, pairwise_overlap, get_unique_features, upset_tables
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("LC-MS Reverse Alignment (KD-Tree + UpSet)")
+        self.title("Raw2Anchor")
         self.geometry("1100x760")
         self.raw_files = []
         self.feature_files = []  # [(path, software, method)]
@@ -41,6 +42,7 @@ class App(tk.Tk):
         self.ppm2 = tk.DoubleVar(value=4.0);  self.rt2 = tk.DoubleVar(value=0.08)
         self.mz_bin = tk.DoubleVar(value=0.001); self.rt_gap = tk.DoubleVar(value=0.08)
         self.min_pts = tk.IntVar(value=3)
+        self.anchor_ppm = tk.DoubleVar(value=10.0)
 
         self._build_ui()
 
@@ -66,11 +68,12 @@ class App(tk.Tk):
         self._param(params, "mz bin (Da)", self.mz_bin, 2, 0)
         self._param(params, "RT gap (min)", self.rt_gap, 2, 1)
         self._param(params, "min pts/anchor", self.min_pts, 3, 0)
+        self._param(params, "Anchor ppm", self.anchor_ppm, 3, 1)
 
         t2 = ttk.Frame(nb); nb.add(t2, text="Run")
         ttk.Button(t2, text="Build anchor map", command=self.run_anchor).pack(anchor="w", padx=8, pady=8)
         ttk.Button(t2, text="Per-method matching + model + Pass-2 (KD-Tree)", command=self.run_match_model).pack(anchor="w", padx=8, pady=8)
-        ttk.Button(t2, text="Union summary + UpSet plot", command=self.run_union_upset).pack(anchor="w", padx=8, pady=8)
+        ttk.Button(t2, text="Union summary", command=self.run_union_summary).pack(anchor="w", padx=8, pady=8)
 
         t3 = ttk.Frame(nb); nb.add(t3, text="Log")
         self.log = tk.Text(t3, state="disabled", height=20); self.log.pack(fill="both", expand=True, padx=8, pady=8)
@@ -121,7 +124,7 @@ class App(tk.Tk):
                 self.raw_files,
                 mz_bin_da=self.mz_bin.get(),
                 rt_gap_min=self.rt_gap.get(),
-                ppm_seed=self.ppm1.get(),
+                ppm_seed=self.anchor_ppm.get(),
                 min_points_per_anchor=self.min_pts.get(),
                 logger=self.logpush
             )
@@ -198,7 +201,7 @@ class App(tk.Tk):
             self.logpush(traceback.format_exc())
             messagebox.showerror("Error", str(e))
 
-    def run_union_upset(self):
+    def run_union_summary(self):
         try:
             if not getattr(self, 'matches_final', None):
                 messagebox.showwarning("Warning", "Run matching/modeling first.")
@@ -221,28 +224,22 @@ class App(tk.Tk):
                     index=False
                 )
 
-            # Build method_order following the GUI table order
+            # UpSet tables: methods in the order they were added in the GUI
             method_order = []
             for iid in self.tbl.get_children():
-                file, sw, meth = self.tbl.item(iid, "values")
+                _, sw, meth = self.tbl.item(iid, "values")
                 key = f"{sw}_{meth}"
                 if key not in method_order:
                     method_order.append(key)
+            upset = upset_tables(pres, method_order=method_order)
+            out = os.path.join(self.output_dir, "upset_intersections.xlsx")
+            with pd.ExcelWriter(out, engine="openpyxl") as xw:
+                upset["intersections"].to_excel(xw, index=False, sheet_name="intersections")
+                upset["set_sizes"].to_excel(xw, index=False, sheet_name="set_sizes")
 
-            # Optional debug logging
-            self.logpush(f"[DEBUG] method_order = {method_order}")
-            self.logpush(f"[DEBUG] presence cols = {list(pres.columns)}")
-
-            # ★ Fix y-axis order to this sequence
-            plot_upset_top(
-                pres,
-                top_k=25,
-                outfile=os.path.join(self.output_dir, "upset_plot.png"),
-                method_order=method_order,
-            )
-
-            self.logpush("[SAVE] union_presence.csv, pairwise_overlap.csv, upset_plot.png")
-            messagebox.showinfo("Done", "Union summary + UpSet plot SAVE")
+            self.logpush("[SAVE] union_presence.csv, pairwise_overlap.csv, unique_anchor_*.csv, "
+                         "unique_feature_*.csv, upset_intersections.xlsx")
+            messagebox.showinfo("Done", "Union summary saved")
         except Exception as e:
             self.logpush("[ERROR] " + str(e))
             self.logpush(traceback.format_exc())

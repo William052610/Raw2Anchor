@@ -1,8 +1,7 @@
-pandas
-numpy
-scikit-learn
-statsmodels
-openpyxl
-pymzml
-pyteomics
-matplotlib
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.2
+statsmodels>=0.14
+openpyxl>=3.1
+pymzml>=2.5
+pyteomics>=4.6

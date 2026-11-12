@@ -1,6 +1,6 @@
 """matcher.py
 
-Feature-to-anchor matching for LC–MS reverse alignment.
+Feature-to-anchor matching for Raw2Anchor.
 
 Matching definition
 -------------------

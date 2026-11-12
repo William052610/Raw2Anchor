@@ -96,10 +96,10 @@ anchor_map.xlsx
 matches_*.csv
 union_presence.csv
 pairwise_overlap.csv
+upset_intersections.xlsx
 unique_anchor_*.csv
 unique_feature_*.csv
 model_*.json
-upset_plot.png
 
 # Optional output folders
 output/

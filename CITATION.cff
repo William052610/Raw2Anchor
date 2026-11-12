@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use Raw2Anchor, please cite this software and the associated article."
+title: "Raw2Anchor"
+type: software
+abstract: "Maps LC-MS feature tables from different software or smoothing methods onto common anchors derived from raw MS1 centroid data."
+authors:
+  - family-names: "Lee"
+    given-names: "Gun Woo"
+    affiliation: "Konkuk University"
+    email: "dlrjsdn0526@konkuk.ac.kr"
+version: 1.1.0
+date-released: 2026-11-08
+license: MIT
+repository-code: "https://github.com/William052610/Raw2Anchor"
+keywords:
+  - LC-MS
+  - metabolomics
+  - feature matching
+  - smoothing
