@@ -7,7 +7,7 @@ Instead of aligning feature tables against each other, it builds a map of
 those anchors. Features from different tables that map to the same anchor are
 counted as the same signal.
 
-Raw2Anchor was developed for the manuscript ** Smoothing Alters Feature
+Raw2Anchor was developed for the manuscript **Smoothing Alters Feature
 Composition and Low-Intensity Signal Recovery in Liquid Chromatography–Mass
 Spectrometry (LC–MS) Untargeted Metabolomics**.
 
@@ -140,7 +140,7 @@ software and smoothing method, with two columns: `m/z` and `rt` (minutes).
 
 **These tables contain true-positive (TP) features only**, not the full
 feature lists exported from MS-DIAL or MZmine. The criteria used to select TP
-features are described in the Methods section of the manuscript.
+features are described in the Methods section of the manuscript. 
 
 The file names already follow the naming rule, so each table is assigned the
 correct software and method when it is added in the GUI.

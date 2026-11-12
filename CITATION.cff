@@ -8,8 +8,8 @@ authors:
     given-names: "Gun Woo"
     affiliation: "Konkuk University"
     email: "dlrjsdn0526@konkuk.ac.kr"
-version: 1.1.0
-date-released: 2026-11-08
+version: "1.0"
+date-released: 2026-11-12
 license: MIT
 repository-code: "https://github.com/William052610/Raw2Anchor"
 keywords:
