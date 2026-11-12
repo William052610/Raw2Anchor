@@ -13,4 +13,4 @@ First public release.
   and per-method set sizes.
 - Example true-positive (TP) feature tables of the five datasets analyzed in
   the manuscript (`examples/`).
-- Tests and continuous integration.
+- Tests.
